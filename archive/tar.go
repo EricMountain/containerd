@@ -460,6 +460,13 @@ func newChangeWriter(w io.Writer, source string) *changeWriter {
 }
 
 func (cw *changeWriter) HandleChange(k fs.ChangeKind, p string, f os.FileInfo, err error) error {
+	const (
+		// Values based on linux/include/uapi/linux/capability.h
+		xattrCapsSz2    = 20
+		versionOffset   = 3
+		vfsCapRevision2 = 2
+		vfsCapRevision3 = 3
+	)
 	if err != nil {
 		return err
 	}
@@ -558,10 +565,17 @@ func (cw *changeWriter) HandleChange(k fs.ChangeKind, p string, f os.FileInfo, e
 		if capability, err := getxattr(source, "security.capability"); err != nil {
 			return errors.Wrap(err, "failed to get capabilities xattr")
 		} else if capability != nil {
+			length := len(capability)
+			if capability[versionOffset] == vfsCapRevision3 {
+				// Convert VFS_CAP_REVISION_3 to VFS_CAP_REVISION_2 as root UID makes no
+				// sense outside the user namespace the archive is built in.
+				capability[versionOffset] = vfsCapRevision2
+				length = xattrCapsSz2
+			}
 			if hdr.PAXRecords == nil {
 				hdr.PAXRecords = map[string]string{}
 			}
-			hdr.PAXRecords[paxSchilyXattr+"security.capability"] = string(capability)
+			hdr.PAXRecords[paxSchilyXattr+"security.capability"] = string(capability[:length])
 		}
 
 		if err := cw.includeParents(hdr); err != nil {
